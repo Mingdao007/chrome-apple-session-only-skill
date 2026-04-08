@@ -9,10 +9,12 @@ Chinese mirror: [README.zh-CN.md](README.zh-CN.md)
 | Component | Status |
 |-----------|--------|
 | Ubuntu | Live-validated |
-| Google Chrome | 146.0.7680.164 |
+| macOS | Live-validated on a real Mac on 2026-04-09 |
+| Google Chrome on Ubuntu | 146.0.7680.164 |
+| Google Chrome on macOS | 146.0.7680.178 |
 | Chrome profile model | `Local State` + per-profile `Preferences` + `Cookies` |
+| Validated macOS profile shape | single `Default` profile resolved from `Local State` |
 | Domain scope | `apple.com`, `[*.]apple.com`, `appleid.apple.com` |
-| macOS | Implemented in script path detection, not yet live-validated on a Mac |
 
 ## Problems Covered
 
@@ -74,7 +76,10 @@ By default, the script resolves the Chrome root by OS and picks the last-used pr
 ## Validation Notes
 
 - On the validated Ubuntu path, the current Chrome profile still contains the intended Apple `session_only` rules.
+- On macOS on 2026-04-09, `audit`, `apply --dry-run`, and `apply` succeeded against a real Google Chrome `Default` profile.
+- That macOS run created timestamped backups, wrote all 5 Apple `session_only` rules, and reduced Apple cookie rows from 6 to 0.
 - While Chrome is open, temporary Apple cookies can still exist. The intended result is cleanup after all Chrome windows fully exit and Chrome starts again.
+- Interactive Apple login after reopening Chrome is still an operator follow-up step, because the final account-specific login behavior depends on the user's own Apple flow.
 - The script intentionally avoids claiming full surgical cleanup inside opaque Chrome LevelDB stores whose on-disk keys are not safely origin-addressable.
 
 ## Privacy Boundary
@@ -88,4 +93,3 @@ This repository ships only portable skill logic, metadata, and tests. It does no
 - `README.zh-CN.md`: Chinese overview
 - `LICENSE`: MIT license
 - `tests/`: stdlib unit tests
-

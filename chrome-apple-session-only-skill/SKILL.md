@@ -85,10 +85,10 @@ python3 scripts/chrome_apple_session_only.py audit --profile "Profile 2"
   - remove Apple site-state metadata that is directly addressable
   - remove directly identifiable Apple-origin storage artifacts only when the on-disk path safely encodes the Apple host
 - Do not claim that every opaque Chrome LevelDB record is surgically scrubbed.
-- On macOS, if the user asks whether the workflow is already personally validated on your machine, state that the path is implemented but public validation may still be pending until the latest real-machine check is done.
+- On macOS, if the user asks whether the workflow is already personally validated on your machine, state that `audit`, `apply --dry-run`, and `apply` were live-validated on a real Mac on 2026-04-09 against a `Default` profile.
+- If the user asks whether the post-relaunch interactive Apple login flow itself was fully verified, state that this remains a manual operator follow-up step because it depends on the user's own Apple account flow.
 
 ## Reference
 
 For exact supported paths, rule shapes, cleanup boundaries, and script behavior,
 see [references/platform-paths-and-safety.md](references/platform-paths-and-safety.md).
-

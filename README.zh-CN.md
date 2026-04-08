@@ -13,12 +13,13 @@ English README: [README.md](README.md)
 ## 当前状态
 
 - Ubuntu 路径已实机验证
-- macOS 路径已在脚本中实现，但 README 目前仍保守标记为未实机验证
+- macOS 已在真实 Mac 上完成 `audit -> apply --dry-run -> apply` 实机验证，验证日期为 2026-04-09
+- 本次 macOS 验证使用 Google Chrome 146.0.7680.178，单一 `Default` profile，并成功创建备份、写入 `5/5` 条 Apple `session_only` 规则、将 Apple cookie 从 `6` 条降到 `0`
 - 默认只覆盖 `apple.com` 家族，不包含 `icloud.com`
+- Chrome 重启后的交互式 Apple 登录是否完全符合你的账户流，仍需要用户自己再做一次人工确认
 
 ## 主要内容
 
 - `chrome-apple-session-only-skill/`: 可安装的 skill 包
 - `chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py`: 审计/应用脚本
 - `tests/test_chrome_apple_session_only.py`: 标准库单元测试
-

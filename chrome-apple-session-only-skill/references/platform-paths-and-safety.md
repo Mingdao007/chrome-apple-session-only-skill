@@ -7,6 +7,13 @@
 
 The script accepts `--chrome-root` for synthetic tests or nonstandard layouts.
 
+## Validation Status
+
+- Ubuntu: live-validated.
+- macOS: live-validated on 2026-04-09 against a real Google Chrome `Default` profile.
+- The validated macOS run covered `audit`, `apply --dry-run`, and `apply`, including timestamped backups plus post-apply confirmation of 5/5 Apple `session_only` rules and 0 Apple cookie rows.
+- Interactive Apple login after reopening Chrome is still an operator verification step, because it depends on the user's own account flow.
+
 ## Profile Resolution
 
 Default order:
@@ -61,4 +68,3 @@ This skill intentionally limits itself to the `apple.com` family:
 - `audit` is read-only.
 - `apply` refuses to mutate while Google Chrome appears to be running.
 - `apply --dry-run` is the no-write preview path.
-
