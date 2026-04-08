@@ -1,0 +1,5 @@
+interface:
+  display_name: "Chrome Apple Session-Only Cleanup"
+  short_description: "Audit or apply Apple session-only cookie rules in Google Chrome on Ubuntu or macOS"
+  default_prompt: "Audit or apply Apple session-only cleanup in Google Chrome. Resolve the active Chrome profile, inspect current Apple cookie rules and stale Apple data, and if requested apply the safe session-only workflow for apple.com, [*.]apple.com, and appleid.apple.com."
+
