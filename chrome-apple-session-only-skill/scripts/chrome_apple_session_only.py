@@ -14,13 +14,37 @@ from pathlib import Path
 from typing import Any
 
 
-APPLE_COOKIE_RULE_KEYS = [
-    "http://[*.]apple.com,*",
-    "http://apple.com:80,*",
-    "https://[*.]apple.com,*",
-    "https://apple.com:443,*",
-    "https://appleid.apple.com:443,*",
-]
+TARGET_CONFIGS = {
+    "apple": {
+        "label": "Apple",
+        "domains": ["apple.com"],
+        "cookie_rule_keys": [
+            "http://[*.]apple.com,*",
+            "http://apple.com:80,*",
+            "https://[*.]apple.com,*",
+            "https://apple.com:443,*",
+            "https://appleid.apple.com:443,*",
+        ],
+    },
+    "claude": {
+        "label": "Claude",
+        "domains": ["claude.ai", "claude.com", "anthropic.com"],
+        "cookie_rule_keys": [
+            "http://[*.]claude.ai,*",
+            "http://claude.ai:80,*",
+            "https://[*.]claude.ai,*",
+            "https://claude.ai:443,*",
+            "http://[*.]claude.com,*",
+            "http://claude.com:80,*",
+            "https://[*.]claude.com,*",
+            "https://claude.com:443,*",
+            "http://[*.]anthropic.com,*",
+            "http://anthropic.com:80,*",
+            "https://[*.]anthropic.com,*",
+            "https://anthropic.com:443,*",
+        ],
+    },
+}
 
 STATE_EXCEPTION_BUCKETS = [
     "cookie_controls_metadata",
@@ -87,34 +111,47 @@ def resolve_profile(chrome_root: Path, profile_override: str | None = None) -> t
     return profile_name, chrome_root / profile_name, local_state_path
 
 
-def content_setting_host(key: str) -> str | None:
+def target_config(name: str) -> dict[str, Any]:
+    try:
+        return TARGET_CONFIGS[name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported target: {name}") from exc
+
+
+def content_setting_hosts(key: str) -> list[str]:
     if not isinstance(key, str):
-        return None
-    pattern = key.split(",", 1)[0]
-    if "://" in pattern:
-        pattern = pattern.split("://", 1)[1]
-    if pattern.startswith("[*.]"):
-        pattern = pattern[4:]
-    host = pattern.split(":", 1)[0].strip().lower()
-    return host or None
+        return []
+    hosts: list[str] = []
+    for pattern in key.split(","):
+        pattern = pattern.strip()
+        if not pattern or pattern == "*":
+            continue
+        if "://" in pattern:
+            pattern = pattern.split("://", 1)[1]
+        if pattern.startswith("[*.]"):
+            pattern = pattern[4:]
+        host = pattern.split(":", 1)[0].strip().lower()
+        if host:
+            hosts.append(host)
+    return hosts
 
 
-def is_target_domain(host: str | None) -> bool:
+def is_target_domain(host: str | None, domains: list[str]) -> bool:
     if not host:
         return False
     host = host.strip().lower().lstrip(".")
-    return host == "apple.com" or host.endswith(".apple.com")
+    return any(host == domain or host.endswith(f".{domain}") for domain in domains)
 
 
-def is_target_content_setting_key(key: str) -> bool:
-    return is_target_domain(content_setting_host(key))
+def is_target_content_setting_key(key: str, domains: list[str]) -> bool:
+    return any(is_target_domain(host, domains) for host in content_setting_hosts(key))
 
 
-def is_target_cookie_host(host: str | None) -> bool:
+def is_target_cookie_host(host: str | None, domains: list[str]) -> bool:
     if not host:
         return False
     host = host.strip().lower().lstrip(".")
-    return is_target_domain(host)
+    return is_target_domain(host, domains)
 
 
 def extract_host_from_origin_artifact_name(name: str) -> str | None:
@@ -146,7 +183,7 @@ def chrome_running() -> bool:
     return False
 
 
-def collect_cookie_rows(cookie_db_path: Path) -> tuple[list[tuple[int, str]], str | None]:
+def collect_cookie_rows(cookie_db_path: Path, domains: list[str]) -> tuple[list[tuple[int, str]], str | None]:
     if not cookie_db_path.is_file():
         return [], None
 
@@ -159,11 +196,11 @@ def collect_cookie_rows(cookie_db_path: Path) -> tuple[list[tuple[int, str]], st
     except sqlite3.Error as exc:
         return [], str(exc)
 
-    hits = [(int(rowid), str(host_key)) for rowid, host_key in rows if is_target_cookie_host(str(host_key))]
+    hits = [(int(rowid), str(host_key)) for rowid, host_key in rows if is_target_cookie_host(str(host_key), domains)]
     return hits, None
 
 
-def count_direct_origin_artifacts(profile_path: Path) -> dict[str, list[str]]:
+def count_direct_origin_artifacts(profile_path: Path, domains: list[str]) -> dict[str, list[str]]:
     matches: dict[str, list[str]] = {}
     for root_name in DIRECT_ARTIFACT_ROOTS:
         root_path = profile_path / root_name
@@ -176,15 +213,18 @@ def count_direct_origin_artifacts(profile_path: Path) -> dict[str, list[str]]:
         for directory in search_roots:
             for child in directory.iterdir():
                 host = extract_host_from_origin_artifact_name(child.name)
-                if is_target_domain(host):
+                if is_target_domain(host, domains):
                     hits.append(str(child))
         if hits:
             matches[root_name] = sorted(set(hits))
     return matches
 
 
-def audit_profile(chrome_root: Path, profile_override: str | None = None) -> dict[str, Any]:
+def audit_profile(chrome_root: Path, target: str, profile_override: str | None = None) -> dict[str, Any]:
     chrome_root = chrome_root.expanduser()
+    config = target_config(target)
+    domains = list(config["domains"])
+    cookie_rule_keys = list(config["cookie_rule_keys"])
     profile_name, profile_path, local_state_path = resolve_profile(chrome_root, profile_override)
     preferences_path = profile_path / "Preferences"
     cookies_path = profile_path / "Cookies"
@@ -201,7 +241,7 @@ def audit_profile(chrome_root: Path, profile_override: str | None = None) -> dic
     present_rules: dict[str, Any] = {}
     missing_rules: list[str] = []
     non_session_only_rules: dict[str, Any] = {}
-    for key in APPLE_COOKIE_RULE_KEYS:
+    for key in cookie_rule_keys:
         rule = cookie_rules.get(key)
         if isinstance(rule, dict) and rule.get("setting") == 4:
             present_rules[key] = rule
@@ -215,14 +255,17 @@ def audit_profile(chrome_root: Path, profile_override: str | None = None) -> dic
         items = exceptions.get(bucket, {})
         if not isinstance(items, dict):
             continue
-        hits = sorted(key for key in items if is_target_content_setting_key(key))
+        hits = sorted(key for key in items if is_target_content_setting_key(key, domains))
         if hits:
             state_bucket_hits[bucket] = hits
 
-    cookie_rows, cookie_db_error = collect_cookie_rows(cookies_path)
+    cookie_rows, cookie_db_error = collect_cookie_rows(cookies_path, domains)
     cookie_host_counts = dict(sorted(Counter(host for _, host in cookie_rows).items()))
 
     return {
+        "target": target,
+        "target_label": config["label"],
+        "target_domains": domains,
         "chrome_root": str(chrome_root),
         "local_state_path": str(local_state_path),
         "profile_name": profile_name,
@@ -231,7 +274,7 @@ def audit_profile(chrome_root: Path, profile_override: str | None = None) -> dic
         "cookies_path": str(cookies_path),
         "chrome_running": chrome_running(),
         "cookie_rules": {
-            "expected_count": len(APPLE_COOKIE_RULE_KEYS),
+            "expected_count": len(cookie_rule_keys),
             "present": present_rules,
             "missing": missing_rules,
             "non_session_only": non_session_only_rules,
@@ -240,11 +283,14 @@ def audit_profile(chrome_root: Path, profile_override: str | None = None) -> dic
         "cookie_host_counts": cookie_host_counts,
         "cookie_db_error": cookie_db_error,
         "state_bucket_hits": state_bucket_hits,
-        "direct_origin_artifacts": count_direct_origin_artifacts(profile_path),
+        "direct_origin_artifacts": count_direct_origin_artifacts(profile_path, domains),
     }
 
 
-def ensure_cookie_rules(preferences: dict[str, Any]) -> dict[str, Any]:
+def ensure_cookie_rules(preferences: dict[str, Any], target: str) -> dict[str, Any]:
+    config = target_config(target)
+    domains = list(config["domains"])
+    cookie_rule_keys = list(config["cookie_rule_keys"])
     profile = preferences.setdefault("profile", {})
     content_settings = profile.setdefault("content_settings", {})
     exceptions = content_settings.setdefault("exceptions", {})
@@ -253,12 +299,12 @@ def ensure_cookie_rules(preferences: dict[str, Any]) -> dict[str, Any]:
         cookie_rules = {}
         exceptions["cookies"] = cookie_rules
 
-    removed_keys = sorted(key for key in list(cookie_rules) if is_target_content_setting_key(key))
+    removed_keys = sorted(key for key in list(cookie_rules) if is_target_content_setting_key(key, domains))
     for key in removed_keys:
         cookie_rules.pop(key, None)
 
     last_modified = chrome_timestamp_now()
-    for key in APPLE_COOKIE_RULE_KEYS:
+    for key in cookie_rule_keys:
         cookie_rules[key] = {
             "last_modified": last_modified,
             "setting": 4,
@@ -266,18 +312,19 @@ def ensure_cookie_rules(preferences: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "removed_keys": removed_keys,
-        "written_keys": list(APPLE_COOKIE_RULE_KEYS),
+        "written_keys": cookie_rule_keys,
     }
 
 
-def remove_state_bucket_entries(preferences: dict[str, Any]) -> dict[str, list[str]]:
+def remove_state_bucket_entries(preferences: dict[str, Any], target: str) -> dict[str, list[str]]:
+    domains = list(target_config(target)["domains"])
     exceptions = preferences.setdefault("profile", {}).setdefault("content_settings", {}).setdefault("exceptions", {})
     removed: dict[str, list[str]] = {}
     for bucket in STATE_EXCEPTION_BUCKETS:
         items = exceptions.get(bucket)
         if not isinstance(items, dict):
             continue
-        hits = sorted(key for key in list(items) if is_target_content_setting_key(key))
+        hits = sorted(key for key in list(items) if is_target_content_setting_key(key, domains))
         if not hits:
             continue
         for key in hits:
@@ -286,15 +333,16 @@ def remove_state_bucket_entries(preferences: dict[str, Any]) -> dict[str, list[s
     return removed
 
 
-def backup_file(path: Path, timestamp: str) -> str | None:
+def backup_file(path: Path, timestamp: str, target: str) -> str | None:
     if not path.exists():
         return None
-    backup_path = path.with_name(f"{path.name}.backup.apple-session-only.{timestamp}")
+    backup_path = path.with_name(f"{path.name}.backup.{target}-session-only.{timestamp}")
     shutil.copy2(path, backup_path)
     return str(backup_path)
 
 
-def delete_cookie_rows(cookie_db_path: Path) -> tuple[int, str | None]:
+def delete_cookie_rows(cookie_db_path: Path, target: str) -> tuple[int, str | None]:
+    domains = list(target_config(target)["domains"])
     if not cookie_db_path.is_file():
         return 0, None
 
@@ -302,7 +350,7 @@ def delete_cookie_rows(cookie_db_path: Path) -> tuple[int, str | None]:
         conn = sqlite3.connect(cookie_db_path)
         try:
             rows = conn.execute("SELECT rowid, host_key FROM cookies").fetchall()
-            rowids = [int(rowid) for rowid, host_key in rows if is_target_cookie_host(str(host_key))]
+            rowids = [int(rowid) for rowid, host_key in rows if is_target_cookie_host(str(host_key), domains)]
             if rowids:
                 placeholders = ", ".join("?" for _ in rowids)
                 conn.execute(f"DELETE FROM cookies WHERE rowid IN ({placeholders})", rowids)
@@ -314,9 +362,10 @@ def delete_cookie_rows(cookie_db_path: Path) -> tuple[int, str | None]:
         return 0, str(exc)
 
 
-def delete_direct_origin_artifacts(profile_path: Path) -> list[str]:
+def delete_direct_origin_artifacts(profile_path: Path, target: str) -> list[str]:
     removed: list[str] = []
-    for paths in count_direct_origin_artifacts(profile_path).values():
+    domains = list(target_config(target)["domains"])
+    for paths in count_direct_origin_artifacts(profile_path, domains).values():
         for raw_path in paths:
             path = Path(raw_path)
             if path.is_dir():
@@ -327,8 +376,8 @@ def delete_direct_origin_artifacts(profile_path: Path) -> list[str]:
     return sorted(set(removed))
 
 
-def apply_profile(chrome_root: Path, profile_override: str | None = None, dry_run: bool = False) -> dict[str, Any]:
-    report = audit_profile(chrome_root, profile_override)
+def apply_profile(chrome_root: Path, target: str, profile_override: str | None = None, dry_run: bool = False) -> dict[str, Any]:
+    report = audit_profile(chrome_root, target, profile_override)
     if report["chrome_running"] and not dry_run:
         raise RuntimeError("Google Chrome appears to be running. Close it before apply.")
 
@@ -337,10 +386,10 @@ def apply_profile(chrome_root: Path, profile_override: str | None = None, dry_ru
     preferences = read_json(preferences_path)
     preferences_copy = copy.deepcopy(preferences)
 
-    rule_summary = ensure_cookie_rules(preferences_copy)
-    removed_state = remove_state_bucket_entries(preferences_copy)
-    direct_artifacts = count_direct_origin_artifacts(Path(report["profile_path"]))
-    cookie_rows, cookie_db_error = collect_cookie_rows(cookies_path)
+    rule_summary = ensure_cookie_rules(preferences_copy, target)
+    removed_state = remove_state_bucket_entries(preferences_copy, target)
+    direct_artifacts = count_direct_origin_artifacts(Path(report["profile_path"]), list(target_config(target)["domains"]))
+    cookie_rows, cookie_db_error = collect_cookie_rows(cookies_path, list(target_config(target)["domains"]))
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     result: dict[str, Any] = {
@@ -358,23 +407,25 @@ def apply_profile(chrome_root: Path, profile_override: str | None = None, dry_ru
         return result
 
     backups = [
-        backup_file(preferences_path, timestamp),
-        backup_file(cookies_path, timestamp),
+        backup_file(preferences_path, timestamp, target),
+        backup_file(cookies_path, timestamp, target),
     ]
     result["backups"] = [item for item in backups if item]
 
     write_json(preferences_path, preferences_copy)
-    removed_cookie_rows, cookie_delete_error = delete_cookie_rows(cookies_path)
-    removed_artifacts = delete_direct_origin_artifacts(Path(report["profile_path"]))
+    removed_cookie_rows, cookie_delete_error = delete_cookie_rows(cookies_path, target)
+    removed_artifacts = delete_direct_origin_artifacts(Path(report["profile_path"]), target)
     result["removed_cookie_rows"] = removed_cookie_rows
     result["cookie_delete_error"] = cookie_delete_error
     result["removed_direct_artifacts"] = removed_artifacts
-    result["report_after"] = audit_profile(chrome_root, profile_override)
+    result["report_after"] = audit_profile(chrome_root, target, profile_override)
     return result
 
 
 def print_audit(report: dict[str, Any]) -> None:
+    label = report["target_label"]
     print("Mode: audit")
+    print(f"Target: {label}")
     print(f"Chrome root: {report['chrome_root']}")
     print(f"Profile: {report['profile_name']}")
     print(f"Profile path: {report['profile_path']}")
@@ -382,26 +433,26 @@ def print_audit(report: dict[str, Any]) -> None:
     print(f"Cookies DB: {report['cookies_path']}")
     print(f"Chrome running: {'yes' if report['chrome_running'] else 'no'}")
     print(
-        "Apple session-only rules: "
+        f"{label} session-only rules: "
         f"{len(report['cookie_rules']['present'])}/{report['cookie_rules']['expected_count']} present"
     )
     if report["cookie_rules"]["missing"]:
         print("Missing rules:")
         for key in report["cookie_rules"]["missing"]:
             print(f"  - {key}")
-    print(f"Apple cookie rows: {report['cookie_row_count']}")
+    print(f"{label} cookie rows: {report['cookie_row_count']}")
     if report["cookie_host_counts"]:
-        print("Apple cookie host counts:")
+        print(f"{label} cookie host counts:")
         for host, count in report["cookie_host_counts"].items():
             print(f"  - {host}: {count}")
     if report["cookie_db_error"]:
         print(f"Cookie DB error: {report['cookie_db_error']}")
     if report["state_bucket_hits"]:
-        print("Apple state metadata hits:")
+        print(f"{label} state metadata hits:")
         for bucket, hits in report["state_bucket_hits"].items():
             print(f"  - {bucket}: {len(hits)}")
     if report["direct_origin_artifacts"]:
-        print("Direct Apple-origin artifacts:")
+        print(f"Direct {label}-origin artifacts:")
         for root_name, hits in report["direct_origin_artifacts"].items():
             print(f"  - {root_name}: {len(hits)}")
 
@@ -410,6 +461,8 @@ def print_apply(result: dict[str, Any]) -> None:
     mode = result["mode"]
     print(f"Mode: {mode}")
     before = result["report_before"]
+    label = before["target_label"]
+    print(f"Target: {label}")
     print(f"Profile: {before['profile_name']}")
     print(f"Chrome running: {'yes' if before['chrome_running'] else 'no'}")
     print(f"Planned cookie rule writes: {len(result['planned_cookie_rules']['written_keys'])}")
@@ -433,21 +486,27 @@ def print_apply(result: dict[str, Any]) -> None:
         print(f"Cookie delete error: {result['cookie_delete_error']}")
     after = result.get("report_after")
     if after is not None:
-        print(f"Apple cookie rows after apply: {after['cookie_row_count']}")
+        print(f"{label} cookie rows after apply: {after['cookie_row_count']}")
         print(
-            "Apple session-only rules after apply: "
+            f"{label} session-only rules after apply: "
             f"{len(after['cookie_rules']['present'])}/{after['cookie_rules']['expected_count']} present"
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Audit or apply Apple session-only cleanup for Google Chrome.")
+    parser = argparse.ArgumentParser(description="Audit or apply session-only cleanup for Google Chrome targets.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("audit", "apply"):
         sub_parser = sub.add_parser(name)
         sub_parser.add_argument("--profile", default=None, help="Chrome profile name, e.g. Default or Profile 2")
         sub_parser.add_argument("--chrome-root", default=None, help="Override the Google Chrome root path")
+        sub_parser.add_argument(
+            "--target",
+            choices=sorted(TARGET_CONFIGS),
+            default="apple",
+            help="Target domain family to clean up",
+        )
 
     sub.choices["apply"].add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     return parser
@@ -461,10 +520,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "audit":
-            print_audit(audit_profile(chrome_root, args.profile))
+            print_audit(audit_profile(chrome_root, args.target, args.profile))
             return 0
         if args.command == "apply":
-            print_apply(apply_profile(chrome_root, args.profile, dry_run=args.dry_run))
+            print_apply(apply_profile(chrome_root, args.target, args.profile, dry_run=args.dry_run))
             return 0
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -476,4 +535,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
