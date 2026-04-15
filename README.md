@@ -62,7 +62,7 @@ Preview an Apple cleanup without writing:
 python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py apply --dry-run
 ```
 
-Apply to a specific Chrome profile:
+Audit a specific Chrome profile:
 
 ```bash
 python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py audit --target apple --profile "Profile 2"

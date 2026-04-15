@@ -55,8 +55,8 @@ This skill intentionally limits itself to one fixed target:
   - `legacy_cookie_scope`
   - `fedcm_idp_registration`
   - `fedcm_idp_signin`
-- `webid_api`
-- `webid_auto_reauthn`
+  - `webid_api`
+  - `webid_auto_reauthn`
 - Removes directly identifiable Apple-origin artifacts from origin-keyed storage names when the host is safely encoded in the path
 
 ## What It Does Not Claim
