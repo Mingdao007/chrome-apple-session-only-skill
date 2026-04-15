@@ -1,11 +1,8 @@
 # chrome-apple-session-only-skill
 
-A Codex skill for making selected Google Chrome login surfaces start clean on the
-next browser launch by enforcing target-specific `session_only` cookie rules and
-clearing stale site data.
-
-The repository keeps Apple as the default target and now also supports a Claude
-target family for `claude.ai`, `claude.com`, and `anthropic.com`.
+A Codex skill for making Apple login surfaces in Google Chrome start clean on
+the next browser launch by enforcing Apple-specific `session_only` cookie rules
+and clearing stale site data.
 
 Chinese mirror: [README.zh-CN.md](README.zh-CN.md)
 
@@ -15,37 +12,28 @@ Chinese mirror: [README.zh-CN.md](README.zh-CN.md)
 |-----------|--------|
 | Ubuntu | Live-validated |
 | macOS Apple target | Live-validated on a real Mac on 2026-04-09 |
-| macOS Claude target | Live-validated on a real Mac on 2026-04-14 |
 | Google Chrome on Ubuntu | 146.0.7680.164 |
 | Google Chrome on macOS | 146.0.7680.178 |
 | Chrome profile model | `Local State` + per-profile `Preferences` + `Cookies` |
 | Validated macOS profile shape | single `Default` profile resolved from `Local State` |
-| Supported targets | `apple` and `claude` |
+| Supported targets | `apple` |
 
 ## Problems Covered
 
 - Apple login in Chrome gets polluted by old Apple cookies or site data
-- Claude or Anthropic web sessions in Chrome become sticky because stale cookies or local state keep getting reused
 - You want the target site's data to survive only for the current Chrome session and disappear after Chrome fully exits
 - You want an audit-first workflow before mutating a Chrome profile
 
 ## Target Scope
 
-Default target:
+Supported target:
 
 - `apple`
 - `apple.com`
 - `[*.]apple.com`
 - `appleid.apple.com`
 
-Optional target:
-
-- `claude`
-- `claude.ai`
-- `claude.com`
-- `anthropic.com`
-
-The tool intentionally does not widen scope beyond those target families.
+The tool intentionally does not widen scope beyond that Apple family.
 
 ## What Ships
 
@@ -68,53 +56,46 @@ Audit the default Apple target:
 python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py audit
 ```
 
-Audit the Claude target family:
+Preview an Apple cleanup without writing:
 
 ```bash
-python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py audit --target claude
-```
-
-Preview a Claude cleanup without writing:
-
-```bash
-python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py apply --target claude --dry-run
+python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py apply --dry-run
 ```
 
 Apply to a specific Chrome profile:
 
 ```bash
-python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py apply --target claude --profile "Profile 2"
+python3 chrome-apple-session-only-skill/scripts/chrome_apple_session_only.py audit --target apple --profile "Profile 2"
 ```
 
-By default, the script resolves the Chrome root by OS, keeps `--target apple`
-as the default behavior, and picks the last-used profile from `Local State`,
-falling back to `Default`.
+By default, the script resolves the Chrome root by OS, uses `apple` as the
+only supported target, and picks the last-used profile from `Local State`,
+falling back to `Default`. Passing `--target apple` remains valid but is
+optional.
 
 ## Safety Model
 
 - `audit` is read-only.
 - `apply` refuses to mutate while Google Chrome appears to be running.
 - `apply` always creates timestamped backups of `Preferences` and `Cookies` before writing.
-- Backups are target-tagged, for example `backup.apple-session-only.*` or `backup.claude-session-only.*`.
+- Backups are target-tagged, for example `backup.apple-session-only.*`.
 - `--dry-run` shows what would change without mutating the profile.
 
 ## Behavior Summary
 
-- Writes target-specific cookie rules as Chrome `session_only` entries under the profile `Preferences`.
-- Removes stale target cookie rows from the profile `Cookies` SQLite database.
-- Removes target-origin state metadata such as site engagement and media engagement from `Preferences`.
-- Removes directly identifiable target-origin artifacts from origin-keyed storage paths when those paths encode the host in their filenames.
-- Does not treat this as a permanent Apple, Claude, or Anthropic block; the goal is clean next-launch state, not broken login.
+- Writes Apple-specific cookie rules as Chrome `session_only` entries under the profile `Preferences`.
+- Removes stale Apple cookie rows from the profile `Cookies` SQLite database.
+- Removes Apple-origin state metadata such as site engagement and media engagement from `Preferences`.
+- Removes directly identifiable Apple-origin artifacts from origin-keyed storage paths when those paths encode the host in their filenames.
+- Does not treat this as a permanent Apple login block; the goal is clean next-launch state, not broken login.
 
 ## Validation Notes
 
 - On the validated Ubuntu path, the current Chrome profile still contains the intended Apple `session_only` rules.
 - On macOS on 2026-04-09, `audit`, `apply --dry-run`, and `apply` succeeded for the default Apple target against a real Google Chrome `Default` profile.
 - That Apple run created timestamped backups, wrote all 5 Apple `session_only` rules, and reduced Apple cookie rows from 6 to 0.
-- On macOS on 2026-04-14, `audit`, `apply --dry-run`, and `apply` succeeded for `--target claude` against a real Google Chrome `Default` profile.
-- That Claude run created timestamped backups, wrote all 12 Claude-family `session_only` rules, removed Claude-family cookie rows, and removed directly addressable Claude IndexedDB artifacts.
 - While Chrome is open, temporary target cookies can still exist. The intended result is cleanup after all Chrome windows fully exit and Chrome starts again.
-- Interactive Apple or Claude login after reopening Chrome is still an operator follow-up step, because the final account-specific login behavior depends on the user's own flow.
+- Interactive Apple login after reopening Chrome is still an operator follow-up step, because the final account-specific login behavior depends on the user's own flow.
 - The script intentionally avoids claiming full surgical cleanup inside opaque Chrome LevelDB stores whose on-disk keys are not safely origin-addressable.
 
 ## Privacy Boundary

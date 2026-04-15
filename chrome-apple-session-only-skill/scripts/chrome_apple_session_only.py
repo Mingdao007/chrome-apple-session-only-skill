@@ -26,24 +26,6 @@ TARGET_CONFIGS = {
             "https://appleid.apple.com:443,*",
         ],
     },
-    "claude": {
-        "label": "Claude",
-        "domains": ["claude.ai", "claude.com", "anthropic.com"],
-        "cookie_rule_keys": [
-            "http://[*.]claude.ai,*",
-            "http://claude.ai:80,*",
-            "https://[*.]claude.ai,*",
-            "https://claude.ai:443,*",
-            "http://[*.]claude.com,*",
-            "http://claude.com:80,*",
-            "https://[*.]claude.com,*",
-            "https://claude.com:443,*",
-            "http://[*.]anthropic.com,*",
-            "http://anthropic.com:80,*",
-            "https://[*.]anthropic.com,*",
-            "https://anthropic.com:443,*",
-        ],
-    },
 }
 
 STATE_EXCEPTION_BUCKETS = [
@@ -494,7 +476,7 @@ def print_apply(result: dict[str, Any]) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Audit or apply session-only cleanup for Google Chrome targets.")
+    parser = argparse.ArgumentParser(description="Audit or apply Apple session-only cleanup for Google Chrome.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("audit", "apply"):
@@ -505,7 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--target",
             choices=sorted(TARGET_CONFIGS),
             default="apple",
-            help="Target domain family to clean up",
+            help="Target domain family to clean up; only apple is supported",
         )
 
     sub.choices["apply"].add_argument("--dry-run", action="store_true", help="Preview changes without writing")
